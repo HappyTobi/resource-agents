@@ -757,7 +757,7 @@ def live_migration(event):
 		if event.EventType == "Freeze" and "live migration" in event.Description.lower():
 			if not event.NotBefore:
 				ocf.logger.info("live migration is already in progress")
-				return event
+				return None
 
 			livemigration_timespan = int(ocf.get_parameter("live_migration_timespan",120))
 			notBefore = datetime.strptime(event.NotBefore,'%a, %d %b %Y %H:%M:%S %Z').replace(tzinfo=timezone.utc)
@@ -828,7 +828,7 @@ def main():
 		shortdesc="List of resources to be considered",
 		longdesc="A comma-separated list of event types that will be handled by this resource agent. (Possible values: Freeze,Reboot,Redeploy)",
 		content_type="string",
-		default="Freeze,Reboot,Redeploy")
+		default="Reboot,Redeploy")
 	agent.add_parameter(
 		"verbose",
 		shortdesc="Enable verbose agent logging",
