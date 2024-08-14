@@ -11,6 +11,7 @@ import sys
 import time
 import subprocess
 import json
+
 try:
 		import urllib2
 		from urllib2 import URLError
@@ -19,6 +20,7 @@ except ImportError:
 		from urllib.error import URLError
 import socket
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 OCF_FUNCTIONS_DIR = os.environ.get("OCF_FUNCTIONS_DIR", "%s/lib/heartbeat" % os.environ.get("OCF_ROOT"))
 sys.path.append(OCF_FUNCTIONS_DIR)
@@ -582,7 +584,7 @@ class Node:
 
 		ocf.logger.debug("putNodeOnline: finished")
 
-	def separateEvents(self, events):
+	def separateEvents(self, events, localEventFilters=None):
 		"""
 		Split own/other nodes' events
 		"""
@@ -595,7 +597,15 @@ class Node:
 			if e.EventType not in self.raOwner.relevantEventTypes:
 				continue
 			if self.azName in e.Resources:
-				localEvents.append(e)
+				# Dynamically filter events based on the event type
+				if len(localEventFilters) > 0:
+					for filter in localEventFilters:
+						e = filter(e)
+						if e:
+							localEvents.append(e)
+							break
+				else:
+					localEvents.append(e)
 			else:
 				remoteEvents.append(e)
 		ocf.logger.debug("separateEvents: finished; localEvents = %s, remoteEvents = %s" % (str(localEvents), str(remoteEvents)))
@@ -607,9 +617,10 @@ class raAzEvents:
 	"""
 	Main class for resource agent
 	"""
-	def __init__(self, relevantEventTypes):
+	def __init__(self, relevantEventTypes, eventFilters):
 		self.node = Node(self)
 		self.relevantEventTypes = relevantEventTypes
+		self.eventFilters = eventFilters
 
 	def monitor(self):
 		ocf.logger.debug("monitor: begin")
@@ -622,7 +633,7 @@ class raAzEvents:
 		ocf.logger.debug("monitor: lastDocVersion = %s; curDocVersion = %s" % (lastDocVersion, curDocVersion))
 
 		# split events local/remote
-		(localEvents, remoteEvents) = self.node.separateEvents(events.Events)
+		(localEvents, remoteEvents) = self.node.separateEvents(events.Events, self.eventFilters)
 
 		# ensure local events are only executing once
 		if curDocVersion == lastDocVersion:
@@ -736,6 +747,38 @@ class raAzEvents:
 
 ##############################################################################
 
+
+# Event filter functions, name must macht the filter argument
+##############################################################################
+def live_migration(event):
+	if event:
+		ocf.logger.info("filter live migration event - id %s type %s event description %s not before %s" % (event.EventId, event.EventType, event.Description, event.NotBefore))
+
+		if event.EventType == "Freeze" and "live migration" in event.Description.lower():
+			if not event.NotBefore:
+				ocf.logger.info("live migration is already in progress")
+				return event
+
+			livemigration_timespan = int(ocf.get_parameter("live_migration_timespan",120))
+			notBefore = datetime.strptime(event.NotBefore,'%a, %d %b %Y %H:%M:%S %Z').replace(tzinfo=timezone.utc)
+			shouldTrigger = notBefore - timedelta(seconds=float(livemigration_timespan))
+			currentTime = datetime.now(timezone.utc)
+
+			if currentTime >= shouldTrigger:
+				ocf.logger.info("live migration event %s is a livemigration event" % event.EventId)
+				return event
+			else:
+				ocf.logger.info("live migration event is to far away to trigger a event id %s - not before %s - current %s" % (event.EventId, event.NotBefore, currentTime))
+				return None
+
+	return None
+
+def load_event_filters(eventFilters):
+	if eventFilters:
+		return [globals()[f] for f in eventFilters.split(",")]
+	return []
+
+
 def setLoglevel(verbose):
 	# set up writing into syslog
 	loglevel = default_loglevel
@@ -765,8 +808,10 @@ https://docs.microsoft.com/en-us/azure/virtual-machines/linux/scheduled-events
 
 def monitor_action(eventTypes):
 	relevantEventTypes = set(eventTypes.split(",") if eventTypes else [])
-	ra = raAzEvents(relevantEventTypes)
+	eventFilters = load_event_filters(ocf.get_parameter("event_filters", "live_migration"))
+	ra = raAzEvents(relevantEventTypes, eventFilters)
 	return ra.monitor()
+
 
 def validate_action(eventTypes):
 	if eventTypes:
@@ -783,7 +828,7 @@ def main():
 		shortdesc="List of resources to be considered",
 		longdesc="A comma-separated list of event types that will be handled by this resource agent. (Possible values: Freeze,Reboot,Redeploy)",
 		content_type="string",
-		default="Reboot,Redeploy")
+		default="Freeze,Reboot,Redeploy")
 	agent.add_parameter(
 		"verbose",
 		shortdesc="Enable verbose agent logging",
@@ -808,6 +853,18 @@ def main():
 		longdesc="Set request timeout in seconds",
 		content_type="integer",
 		default="15")
+	agent.add_parameter(
+		"live_migration_timespan",
+		shortdesc="Configure an timespan in seconds when a live migration not before event is triggered",
+		longdesc="Set time in seconds",
+		content_type="integer",
+		default="120")
+	agent.add_parameter(
+		"event_filters",
+		shortdesc="Configure a list of event filters",
+		longdesc="A comma-separated list of event filters that will be enabled by this resource agent. (Possible values: live_migration)",
+		content_type="string",
+		default="live_migration")
 	agent.add_action("start", timeout=10, handler=lambda: ocf.OCF_SUCCESS)
 	agent.add_action("stop", timeout=10, handler=lambda: ocf.OCF_SUCCESS)
 	agent.add_action("validate-all", timeout=20, handler=validate_action)
