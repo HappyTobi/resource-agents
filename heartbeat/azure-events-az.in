@@ -32,11 +32,12 @@ import ocf
 VERSION = "0.20"
 USER_AGENT = "Pacemaker-ResourceAgent/%s %s" % (VERSION, ocf.distro())
 
-attr_globalPullState = "azure-events-az_globalPullState"
-attr_lastDocVersion  = "azure-events-az_lastDocVersion"
-attr_curNodeState = "azure-events-az_curNodeState"
-attr_pendingEventIDs = "azure-events-az_pendingEventIDs"
-attr_healthstate = "#health-azure"
+attr_globalPullState 	= "azure-events-az_globalPullState"
+attr_lastDocVersion  	= "azure-events-az_lastDocVersion"
+attr_curNodeState 		= "azure-events-az_curNodeState"
+attr_pendingEventIDs 	= "azure-events-az_pendingEventIDs"
+attr_healthstate 		= "#health-azure"
+attr_run_ers 			= "run_ers"
 
 default_loglevel = ocf.logging.INFO
 default_relevantEventTypes = set(["Reboot", "Redeploy"])
@@ -268,6 +269,25 @@ class clusterHelper:
 		return val if not val.isdigit() else int(val)
 
 	@staticmethod
+	def getStatusAttr(key, node=None):
+		"""
+		Retrieve a global/local attribute from the Pacemaker cluster
+		"""
+		ocf.logger.debug("getStatusAttr: begin; key = %s, node = %s" % (key, node))
+
+		val = clusterHelper._exec("crm_attribute",
+								  clusterHelper._getLocation(node),
+								  "--type", "status",
+								  "--name", key,
+								  "--quiet",
+								  "--default", "",
+								  )
+		ocf.logger.debug("getStatusAttr: finished")
+		if not val:
+			return None
+		return val if not val.isdigit() else int(val)
+
+	@staticmethod
 	def getAllNodes():
 		"""
 		Get a list of hostnames for all nodes in the Pacemaker cluster
@@ -447,6 +467,12 @@ class Node:
 		self.setAttr("azName", self.azName)
 		clusterHelper.setAttr("hostName_%s" % self.azName, self.hostName)
 
+		# Check if node is running ERS
+		self.ersRunning = None
+		sid = ocf.get_parameter("sid", "")
+		if sid != "":
+			self.ersRunning = self.getStatusAttr("%s_%s" % (attr_run_ers, sid.upper()))
+
 	def getAttr(self, key):
 		"""
 		Get a local attribute
@@ -594,18 +620,18 @@ class Node:
 		remoteEvents = []
 		for e in events:
 			e = attrDict(e)
+			# Filters has to be applied to all events
+			if len(localEventFilters) > 0:
+				for filter in localEventFilters:
+					e = filter(self,e)
+					if e:
+						localEvents.append(e)
+
+			# Default behavior
 			if e.EventType not in self.raOwner.relevantEventTypes:
 				continue
 			if self.azName in e.Resources:
-				# Dynamically filter events based on the event type
-				if len(localEventFilters) > 0:
-					for filter in localEventFilters:
-						e = filter(e)
-						if e:
-							localEvents.append(e)
-							break
-				else:
-					localEvents.append(e)
+				localEvents.append(e)
 			else:
 				remoteEvents.append(e)
 		ocf.logger.debug("separateEvents: finished; localEvents = %s, remoteEvents = %s" % (str(localEvents), str(remoteEvents)))
@@ -630,6 +656,7 @@ class raAzEvents:
 		# get current document version
 		curDocVersion  = events.DocumentIncarnation
 		lastDocVersion = self.node.getAttr(attr_lastDocVersion)
+
 		ocf.logger.debug("monitor: lastDocVersion = %s; curDocVersion = %s" % (lastDocVersion, curDocVersion))
 
 		# split events local/remote
@@ -748,15 +775,29 @@ class raAzEvents:
 ##############################################################################
 
 
-# Event filter functions, name must macht the filter argument
 ##############################################################################
-def live_migration(event):
-	if event:
+def live_migration(self,event):
+	"""
+	Filter function for live migration events.
+	Live migration events are only triggered if the node is in available state.
+	Live migration events without a not before time and a node state that is different than AVAILABLE will put the node back to an AVAILABLE state.
+	"""
+
+	if event and self.ersRunning == 0:
 		ocf.logger.info("filter live migration event - id %s type %s event description %s not before %s" % (event.EventId, event.EventType, event.Description, event.NotBefore))
 
 		if event.EventType == "Freeze" and "live migration" in event.Description.lower():
 			if not event.NotBefore:
-				ocf.logger.info("live migration is already in progress")
+				curState = self.getState()
+				if curState != AVAILABLE:
+					ocf.logger.info("live migration has no not before time, try to put node back to work - event id %s" % event.EventId)
+					curState = self.updateNodeStateAndEvents(AVAILABLE, None)
+					ocf.logger.info("live migration updated the node event to %s" % curState)
+					self.putNodeOnline()
+					clusterHelper.removeHoldFromNodes()
+				else:
+					ocf.logger.info("live migration has no not before time, but node is already in available state - event id %s" % event.EventId)
+
 				return None
 
 			livemigration_timespan = int(ocf.get_parameter("live_migration_timespan",120))
@@ -770,6 +811,8 @@ def live_migration(event):
 			else:
 				ocf.logger.info("live migration event is to far away to trigger a event id %s - not before %s - current %s" % (event.EventId, event.NotBefore, currentTime))
 				return None
+	else:
+		ocf.logger.info("live migration filter is skipped for event - ersRunning %d " % (self.ersRunning))
 
 	return None
 
@@ -853,6 +896,12 @@ def main():
 		longdesc="Set request timeout in seconds",
 		content_type="integer",
 		default="15")
+	agent.add_parameter(
+		"sid",
+		shortdesc="Configure a sid",
+		longdesc="Set an SID to get attribute nodes from the cluster",
+		content_type="string",
+		default="")
 	agent.add_parameter(
 		"live_migration_timespan",
 		shortdesc="Configure an timespan in seconds when a live migration not before event is triggered",
