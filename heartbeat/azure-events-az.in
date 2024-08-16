@@ -37,7 +37,7 @@ attr_lastDocVersion  	= "azure-events-az_lastDocVersion"
 attr_curNodeState 		= "azure-events-az_curNodeState"
 attr_pendingEventIDs 	= "azure-events-az_pendingEventIDs"
 attr_healthstate 		= "#health-azure"
-attr_run_ers 			= "run_ers"
+attr_runs_ers 			= "runs_ers"
 
 default_loglevel = ocf.logging.INFO
 default_relevantEventTypes = set(["Reboot", "Redeploy"])
@@ -66,7 +66,7 @@ class attrDict(defaultdict):
 
 class azHelper:
 	"""
-	Helper class for Azure's metadata API (including Scheduled Events)
+	Helper class for Azure's metadata API (including Scheduled Events)gi
 	"""
 	metadata_host = "http://169.254.169.254/metadata"
 	instance_api  = "instance"
@@ -471,7 +471,7 @@ class Node:
 		self.ersRunning = None
 		sid = ocf.get_parameter("sid", "")
 		if sid != "":
-			self.ersRunning = self.getStatusAttr("%s_%s" % (attr_run_ers, sid.upper()))
+			self.ersRunning = self.getStatusAttr("%s_%s" % (attr_runs_ers, sid.upper()))
 
 	def getAttr(self, key):
 		"""
