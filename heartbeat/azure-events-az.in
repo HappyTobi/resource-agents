@@ -66,7 +66,7 @@ class attrDict(defaultdict):
 
 class azHelper:
 	"""
-	Helper class for Azure's metadata API (including Scheduled Events)gi
+	Helper class for Azure's metadata API (including Scheduled Events)
 	"""
 	metadata_host = "http://169.254.169.254/metadata"
 	instance_api  = "instance"
@@ -472,12 +472,19 @@ class Node:
 		sid = ocf.get_parameter("sid", "")
 		if sid != "":
 			self.ersRunning = self.getStatusAttr("%s_%s" % (attr_runs_ers, sid.upper()))
+			ocf.logger.debug("node: ERS is running with value: %s" % self.ersRunning)
 
 	def getAttr(self, key):
 		"""
 		Get a local attribute
 		"""
 		return clusterHelper.getAttr(key, node=self.hostName)
+
+	def getStatusAttr(self, key):
+		"""
+		Get a local status attribute
+		"""
+		return clusterHelper.getStatusAttr(key, node=self.hostName)
 
 	def setAttr(self, key, value):
 		"""
@@ -618,15 +625,16 @@ class Node:
 
 		localEvents = []
 		remoteEvents = []
+
+  		# Filter events with configured filters
+		if len(localEventFilters) > 0:
+			for filter in localEventFilters:
+					filteredEvent = filter(self,events)
+					if filteredEvent and len(filteredEvent) > 0:
+						localEvents.extend(filteredEvent)
+
 		for e in events:
 			e = attrDict(e)
-			# Filters has to be applied to all events
-			if len(localEventFilters) > 0:
-				for filter in localEventFilters:
-					e = filter(self,e)
-					if e:
-						localEvents.append(e)
-
 			# Default behavior
 			if e.EventType not in self.raOwner.relevantEventTypes:
 				continue
@@ -776,14 +784,22 @@ class raAzEvents:
 
 
 ##############################################################################
-def live_migration(self,event):
+def live_migration(self,events):
 	"""
 	Filter function for live migration events.
 	Live migration events are only triggered if the node is in available state.
 	Live migration events without a not before time and a node state that is different than AVAILABLE will put the node back to an AVAILABLE state.
 	"""
 
-	if event and self.ersRunning == 0:
+	# Exit early if runs_ers value is not matching
+	if self.ersRunning == 1:
+		ocf.logger.info("live migration filter is skipped for events - runs_ers is 1")
+		return None
+
+	localEvents = []
+	for e in events:
+		event = attrDict(e)
+
 		ocf.logger.info("filter live migration event - id %s type %s event description %s not before %s" % (event.EventId, event.EventType, event.Description, event.NotBefore))
 
 		if event.EventType == "Freeze" and "live migration" in event.Description.lower():
@@ -797,24 +813,25 @@ def live_migration(self,event):
 					clusterHelper.removeHoldFromNodes()
 				else:
 					ocf.logger.info("live migration has no not before time, but node is already in available state - event id %s" % event.EventId)
+					localEvents.clear()
 
-				return None
+				# Skip the event
+				continue
 
+			# Handle scheduled live migration event
 			livemigration_timespan = int(ocf.get_parameter("live_migration_timespan",120))
 			notBefore = datetime.strptime(event.NotBefore,'%a, %d %b %Y %H:%M:%S %Z').replace(tzinfo=timezone.utc)
 			shouldTrigger = notBefore - timedelta(seconds=float(livemigration_timespan))
 			currentTime = datetime.now(timezone.utc)
 
-			if currentTime >= shouldTrigger:
+			if currentTime >= shouldTrigger and currentTime <= notBefore:
 				ocf.logger.info("live migration event %s is a livemigration event" % event.EventId)
-				return event
+				localEvents.append(event)
 			else:
-				ocf.logger.info("live migration event is to far away to trigger a event id %s - not before %s - current %s" % (event.EventId, event.NotBefore, currentTime))
-				return None
-	else:
-		ocf.logger.info("live migration filter is skipped for event - ersRunning %d " % (self.ersRunning))
+				ocf.logger.info("live migration event is too far away to trigger a event id %s - not before %s trigger time %s - current %s" % (event.EventId, event.NotBefore,shouldTrigger, currentTime))
+				continue
 
-	return None
+	return localEvents
 
 def load_event_filters(eventFilters):
 	if eventFilters:
