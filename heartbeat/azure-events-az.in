@@ -18,6 +18,7 @@ except ImportError:
 		import urllib.request as urllib2
 		from urllib.error import URLError
 import socket
+import trace
 from collections import defaultdict
 
 OCF_FUNCTIONS_DIR = os.environ.get("OCF_FUNCTIONS_DIR", "%s/lib/heartbeat" % os.environ.get("OCF_ROOT"))
@@ -754,9 +755,9 @@ away from the affected node to allow for a graceful shutdown.
  		crm configure property node-health-strategy=custom
    		crm configure location loc_azure_health /'!health-.*'/ rule '#health-azure': defined '#uname'
 
-     	Set #health-azure attribute to 0 (healthy) for every node in the cluster (example of node1 only): 
+     	Set #health-azure attribute to 0 (healthy) for every node in the cluster (example of node1 only):
       		crm_attribute --node node1 --name '#health-azure' --update 0
-	
+
  	Configure the RA:
 		crm configure primitive health-azure-events ocf:heartbeat:azure-events-az \
   			params eventTypes="Reboot,Redeploy" verbose=false retry_count=3 retry_wait=20 request_timeout=15 \
@@ -821,7 +822,11 @@ def main():
 	agent.add_action("validate-all", timeout=20, handler=validate_action)
 	agent.add_action("monitor", timeout=240, interval=10, handler=monitor_action)
 	setLoglevel(ocf.is_true(ocf.get_parameter("verbose", "false")))
-	agent.run()
+	if ocf.is_true(ocf.get_parameter("trace", "false")):
+		tracer = tracer.Trace(trace=True, count=False)
+		tracer.runfunc(agent.run)
+	else:
+		agent.run()
 
 if __name__ == '__main__':
 	main()
