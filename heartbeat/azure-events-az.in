@@ -19,6 +19,8 @@ except ImportError:
 		from urllib.error import URLError
 import socket
 import trace
+import tempfile
+import fcntl
 from collections import defaultdict
 
 OCF_FUNCTIONS_DIR = os.environ.get("OCF_FUNCTIONS_DIR", "%s/lib/heartbeat" % os.environ.get("OCF_ROOT"))
@@ -785,6 +787,61 @@ def validate_action(eventTypes):
 				return ocf.OCF_ERR_CONFIGURED
 	return ocf.OCF_SUCCESS
 
+def defaultTraceDir():
+	return os.path.join(os.environ.get("HA_VARLIB") or "/var/lib/heartbeat", "trace_ra")
+
+def runAgent(agent):
+	action = ocf.OCF_ACTION or "unknown"
+	traceEnabled = os.environ.get("OCF_TRACE_RA") or ocf.get_parameter("trace_ra", "false")
+	if (not ocf.is_true(traceEnabled.lower()) or
+			action in ("meta-data", "usage", "methods") or
+			(len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"))):
+		return agent.run()
+
+	traceDir = os.path.join(ocf.get_parameter("trace_dir") or defaultTraceDir(), agent.name)
+	tracePath = os.environ.get("OCF_TRACE_FILE", "")
+	traceDescriptor = tracePath in tuple(str(descriptor) for descriptor in range(3, 10))
+	if tracePath and not traceDescriptor and not os.path.isabs(tracePath):
+		ocf.logger.warning("OCF_TRACE_FILE must be an open writable FD (3-9) or an absolute file path; using trace_dir")
+		tracePath = ""
+	instance = os.environ.get("OCF_RESOURCE_INSTANCE") or agent.name
+	prefix = "%s.%s.%s." % (instance.replace("/", "_"), action.replace("/", "_"), time.strftime("%Y-%m-%d.%H:%M:%S"))
+	try:
+		if traceDescriptor:
+			descriptor = int(tracePath)
+			if fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY:
+				raise OSError("Trace file descriptor is not writable")
+			traceFD = os.dup(descriptor)
+		else:
+			destinationDir = os.path.dirname(tracePath) if tracePath else traceDir
+			try:
+				os.makedirs(destinationDir)
+			except OSError:
+				if not os.path.isdir(destinationDir):
+					raise
+			if tracePath:
+				traceFD = os.open(tracePath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+			else:
+				traceFD, tracePath = tempfile.mkstemp(prefix=prefix, dir=traceDir)
+		try:
+			traceFile = os.fdopen(traceFD, "w", 1)
+		except Exception:
+			os.close(traceFD)
+			raise
+	except (OSError, ValueError) as err:
+		ocf.logger.warning("Unable to open RA trace destination %s: %s; running without tracing" % (tracePath or traceDir, err))
+		return agent.run()
+
+	with traceFile:
+		ocf.logger.info("Writing RA trace to %s" % tracePath)
+		tracer = trace.Trace(trace=True, count=False)
+		originalStdout = sys.stdout
+		try:
+			sys.stdout = traceFile
+			return tracer.runfunc(agent.run)
+		finally:
+			sys.stdout = originalStdout
+
 def main():
 	agent = ocf.Agent("azure-events-az", shortdesc=description[0], longdesc=description[1])
 	agent.add_parameter(
@@ -817,16 +874,24 @@ def main():
 		longdesc="Set request timeout in seconds",
 		content_type="integer",
 		default="15")
+	agent.add_parameter(
+		"trace_ra",
+		shortdesc="Enable Python resource agent tracing",
+		longdesc="Set to true for debugging to capture executed Python lines and Python stdout. A nonempty OCF_TRACE_RA environment variable overrides this parameter, as in the shell helpers. Metadata and help output are not traced. Tracing increases execution time and disk usage; disable after debugging.",
+		content_type="boolean",
+		default="false")
+	agent.add_parameter(
+		"trace_dir",
+		shortdesc="Resource agent trace directory",
+		longdesc="Base directory for trace files when tracing is enabled. Files are stored under azure-events-az with the resource instance, action, timestamp, and a unique suffix. Defaults to HA_VARLIB/trace_ra, or /var/lib/heartbeat/trace_ra when HA_VARLIB is unset or empty. OCF_TRACE_FILE overrides the destination with an absolute file path (overwritten each invocation) or an already open writable file descriptor 3-9. Invalid destination formats fall back to this directory.",
+		content_type="string",
+		default=defaultTraceDir())
 	agent.add_action("start", timeout=10, handler=lambda: ocf.OCF_SUCCESS)
 	agent.add_action("stop", timeout=10, handler=lambda: ocf.OCF_SUCCESS)
 	agent.add_action("validate-all", timeout=20, handler=validate_action)
 	agent.add_action("monitor", timeout=240, interval=10, handler=monitor_action)
 	setLoglevel(ocf.is_true(ocf.get_parameter("verbose", "false")))
-	if ocf.is_true(ocf.get_parameter("trace", "false")):
-		tracer = tracer.Trace(trace=True, count=False)
-		tracer.runfunc(agent.run)
-	else:
-		agent.run()
+	runAgent(agent)
 
 if __name__ == '__main__':
 	main()
