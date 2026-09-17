@@ -20,7 +20,7 @@ except ImportError:
 import socket
 from collections import defaultdict
 
-OCF_FUNCTIONS_DIR = os.environ.get("OCF_FUNCTIONS_DIR", "%s/lib/heartbeat" % os.environ.get("OCF_ROOT"))
+OCF_FUNCTIONS_DIR = os.environ.get("OCF_FUNCTIONS_DIR", f"{os.environ.get('OCF_ROOT')}/lib/heartbeat")
 sys.path.append(OCF_FUNCTIONS_DIR)
 import ocf
 
@@ -28,7 +28,7 @@ import ocf
 
 
 VERSION = "0.20"
-USER_AGENT = "Pacemaker-ResourceAgent/%s %s" % (VERSION, ocf.distro())
+USER_AGENT = f"Pacemaker-ResourceAgent/{VERSION} {ocf.distro()}"
 
 attr_lastDocVersion  = "azure-events-az_lastDocVersion"
 attr_curNodeState = "azure-events-az_curNodeState"
@@ -36,7 +36,7 @@ attr_pendingEventIDs = "azure-events-az_pendingEventIDs"
 attr_healthstate = "#health-azure"
 
 default_loglevel = ocf.logging.INFO
-default_relevantEventTypes = set(["Reboot", "Redeploy"])
+default_relevantEventTypes = {"Reboot", "Redeploy"}
 
 ##############################################################################
 
@@ -80,7 +80,7 @@ class azHelper:
 		retryWaitTime = int(ocf.get_parameter("retry_wait",20))
 		requestTimeout = int(ocf.get_parameter("request_timeout",15))
 
-		url = "%s/%s?api-version=%s" % (azHelper.metadata_host, endpoint, api_version)
+		url = f"{azHelper.metadata_host}/{endpoint}?api-version={api_version}"
 		data = ""
 		ocf.logger.debug(f"_sendMetadataRequest: begin; endpoint = {endpoint!s}, postData = {postData!s}, retry_count = {retryCount!s}, retry_wait time = {retryWaitTime!s}, request_timeout = {requestTimeout!s}")
 		ocf.logger.debug(f"_sendMetadataRequest: url = {url!s}")
@@ -147,8 +147,8 @@ class azHelper:
 			ocf.logger.debug(f"getInstanceInfo: finished, returning {jsondata['compute']}")
 			return attrDict(jsondata["compute"])
 		else:
-			apiCall = "%s/%s?api-version=%s" % (azHelper.metadata_host, azHelper.instance_api, azHelper.instance_api_version)
-			ocf.ocf_exit_reason("getInstanceInfo: Unable to get instance info - call: %s" % apiCall)
+			apiCall = f"{azHelper.metadata_host}/{azHelper.instance_api}?api-version={azHelper.instance_api_version}"
+			ocf.ocf_exit_reason(f"getInstanceInfo: Unable to get instance info - call: {apiCall}")
 			sys.exit(ocf.OCF_ERR_GENERIC)
 
 	@staticmethod
@@ -165,8 +165,8 @@ class azHelper:
 			ocf.logger.debug("pullScheduledEvents: finished")
 			return attrDict(jsondata)
 		else:
-			apiCall = "%s/%s?api-version=%s" % (azHelper.metadata_host, azHelper.events_api, azHelper.events_api_version)
-			ocf.ocf_exit_reason("pullScheduledEvents: Unable to get scheduledevents info - call: %s" % apiCall)
+			apiCall = f"{azHelper.metadata_host}/{azHelper.events_api}?api-version={azHelper.events_api_version}"
+			ocf.ocf_exit_reason(f"pullScheduledEvents: Unable to get scheduledevents info - call: {apiCall}")
 			sys.exit(ocf.OCF_ERR_GENERIC)
 
 
@@ -294,7 +294,7 @@ class clusterHelper:
 		"""
 		Helper function to get the actual host name from an Azure node name
 		"""
-		return clusterHelper.getAttr("hostName_%s" % azName)
+		return clusterHelper.getAttr(f"hostName_{azName}")
 
 	@staticmethod
 	def removeHoldFromNodes():
@@ -456,7 +456,7 @@ class Node:
 		self.hostName = clusterHelper._exec("crm_node", "-n")
 		ocf.logger.debug(f"Node: azure_name={self.azName} host_name={self.hostName}")
 		self.setAttr("azName", self.azName)
-		clusterHelper.setAttr("hostName_%s" % self.azName, self.hostName)
+		clusterHelper.setAttr(f"hostName_{self.azName}", self.hostName)
 
 	def getAttr(self, key):
 		"""
