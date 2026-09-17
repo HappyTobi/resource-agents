@@ -4,6 +4,7 @@
 #
 # 	License:	GNU General Public License (GPL)
 #	(c) 2018 	Tobias Niekamp, Microsoft Corp.
+#	(c) 2026 	Tobias Schug, Microsoft Corp.
 #				and Linux-HA contributors
 
 import os
@@ -27,7 +28,7 @@ import ocf
 ##############################################################################
 
 
-VERSION = "0.20"
+VERSION = "0.21"
 USER_AGENT = f"Pacemaker-ResourceAgent/{VERSION} {ocf.distro()}"
 
 attr_lastDocVersion  = "azure-events-az_lastDocVersion"
@@ -37,6 +38,7 @@ attr_healthstate = "#health-azure"
 
 default_loglevel = ocf.logging.INFO
 default_relevantEventTypes = {"Reboot", "Redeploy"}
+default_allEventTypes = {"Freeze", "Reboot", "Redeploy"}
 
 ##############################################################################
 
@@ -647,7 +649,7 @@ class raAzEvents:
 			ocf.logger.debug(f"monitor: node={self.node.hostName} decision=skip reason=document_already_handled document={curDocVersion} last_handled={lastDocVersion}")
 			return ocf.OCF_SUCCESS
 
-		localAzEventIds = dict()
+		localAzEventIds = {}
 		for e in localEvents:
 			localAzEventIds[e.EventId] = json.dumps(e)
 
@@ -822,8 +824,8 @@ def monitor_action(eventTypes):
 def validate_action(eventTypes):
 	if eventTypes:
 		for event in eventTypes.split(","):
-			if event not in ("Freeze", "Reboot", "Redeploy"):
-				ocf.ocf_exit_reason("Event type not one of Freeze, Reboot, Redeploy: " + eventTypes)
+			if event not in default_allEventTypes:
+				ocf.ocf_exit_reason(f"Event type not one of {','.join(default_allEventTypes)}: {eventTypes}")
 				return ocf.OCF_ERR_CONFIGURED
 	return ocf.OCF_SUCCESS
 
@@ -831,8 +833,8 @@ def main():
 	agent = ocf.Agent("azure-events-az", shortdesc=description[0], longdesc=description[1])
 	agent.add_parameter(
 		"eventTypes",
-		shortdesc="List of resources to be considered",
-		longdesc="A comma-separated list of event types that will be handled by this resource agent. (Possible values: Freeze,Reboot,Redeploy)",
+		shortdesc="List of event types to be considered",
+		longdesc=f"A comma-separated list of event types that will be handled by this resource agent. (Possible values: {','.join(default_allEventTypes)})",
 		content_type="string",
 		default="Reboot,Redeploy")
 	agent.add_parameter(
