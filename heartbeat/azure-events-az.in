@@ -135,7 +135,6 @@ class azHelper:
 					ocf.logger.debug(f"_sendMetadataRequest: method={req.get_method()} endpoint={endpoint} attempt={retry + 1}/{retryCount + 1} status={resp.getcode()} outcome=response_received elapsed_ms={timer.elapsed_ms()}")
 
 				ocf.logger.debug(f"_sendMetadataRequest: endpoint={endpoint} response_bytes={len(data)} outcome=response_read")
-				ocf.logger.debug(f"_sendMetadataRequest: response = {data!s}")
 				successful = 1
 				break
 
@@ -152,14 +151,15 @@ class azHelper:
 	def getInstanceInfo():
 		"""
 		Fetch details about the current VM from Azure's Azure Metadata Service API
+		Log only VM name, zone, SKU type, OS type, and location.
 		"""
 		ocf.logger.debug("getInstanceInfo: begin")
 
 		jsondata = azHelper._sendMetadataRequest(azHelper.instance_api, None, azHelper.instance_api_version)
-		ocf.logger.debug(f"getInstanceInfo: json = {jsondata!s}")
 
 		if jsondata:
-			ocf.logger.debug(f"getInstanceInfo: finished, returning {jsondata['compute']}")
+			compute = jsondata["compute"]
+			ocf.logger.debug(f"getInstanceInfo: vm_name={compute.get('name', '')} zone={compute.get('zone', '')} sku_type={compute.get('vmSize', '')} osType={compute.get('osType', '')} location={compute.get('location', '')}")
 			return attrDict(jsondata["compute"])
 		else:
 			apiCall = f"{azHelper.metadata_host}/{azHelper.instance_api}?api-version={azHelper.instance_api_version}"
@@ -174,7 +174,6 @@ class azHelper:
 		ocf.logger.debug("pullScheduledEvents: begin")
 
 		jsondata = azHelper._sendMetadataRequest(azHelper.events_api, None, azHelper.events_api_version)
-		ocf.logger.debug(f"pullScheduledEvents: json = {jsondata!s}")
 
 		if jsondata:
 			ocf.logger.debug("pullScheduledEvents: finished")
@@ -794,7 +793,7 @@ class raAzEvents:
 				# force the start of all events whose nodes are ready (i.e. have no more resources running)
 				if len(eventIDsForNode.keys()) > 0:
 					self.monitorSummary.update(decision="acknowledge")
-					eventIDsToForce = set([item for sublist in eventIDsForNode.values() for item in sublist])
+					eventIDsToForce = {item for sublist in eventIDsForNode.values() for item in sublist}
 					ocf.logger.info(f"monitor: set nodes {eventIDsForNode.keys()!s} to IN_EVENT; force remote events {eventIDsToForce!s}")
 					ocf.logger.info(f"monitor: request state=IN_EVENT nodes={list(eventIDsForNode.keys())} event_ids={eventIDsToForce}; acknowledgment not yet sent")
 					for node, eventId in eventIDsForNode.items():
