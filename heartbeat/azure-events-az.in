@@ -819,7 +819,26 @@ def setLoglevel(verbose):
 		opener = urllib2.build_opener(urllib2.HTTPHandler(debuglevel=1))
 		urllib2.install_opener(opener)
 		loglevel = ocf.logging.DEBUG
+		# Configure a file logger
+		configureLogger()
 	ocf.log.setLevel(loglevel)
+
+def configureLogger():
+	traceDir = ocf.get_parameter("trace_dir")
+	if not traceDir:
+		return
+
+	logPath = os.path.abspath(os.path.join(traceDir, "azure-events-az.log"))
+	try:
+		os.makedirs(traceDir, exist_ok=True)
+		handler = ocf.logging.FileHandler(logPath, encoding="utf-8")
+	except OSError as error:
+		ocf.logger.warning(f"Unable to configure trace_dir file logging at {logPath}: {error}")
+		return
+	handler.setFormatter(ocf.logging.Formatter(
+		'%(filename)s(%(OCF_RESOURCE_INSTANCE)s)[%(process)s]:\t%(asctime)s %(levelname)s: %(message)s',
+		datefmt=ocf.HA_DATEFMT))
+	ocf.log.addHandler(handler)
 
 description = (
 	"Microsoft Azure Scheduled Events monitoring agent",
@@ -898,7 +917,7 @@ def main():
 	agent.add_parameter(
 		"verbose",
 		shortdesc="Enable verbose agent logging",
-		longdesc="Set to true to enable verbose logging",
+		longdesc="Set to true to enable verbose logging. If unset, use trace_ra (OCF_RESKEY_trace_ra); if both are unset, default to false.",
 		content_type="boolean",
 		default="false")
 	agent.add_parameter(
@@ -923,7 +942,7 @@ def main():
 	agent.add_action("stop", timeout=10, handler=stop_action)
 	agent.add_action("validate-all", timeout=20, handler=validate_action)
 	agent.add_action("monitor", timeout=240, interval=10, handler=monitor_action)
-	setLoglevel(ocf.is_true(ocf.get_parameter("verbose", "false")))
+	setLoglevel(ocf.is_true(ocf.get_parameter("verbose", ocf.get_parameter("trace_ra", "false"))))
 	agent.run()
 
 if __name__ == '__main__':
