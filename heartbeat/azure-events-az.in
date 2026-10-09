@@ -828,7 +828,11 @@ def configureLogger():
 	if not traceDir:
 		return
 
-	logPath = os.path.abspath(os.path.join(traceDir, "azure-events-az.log"))
+	# Ensure the trace directory exists and is an absolute path
+	traceDir = os.path.abspath(os.path.join(traceDir, "azure-events-az"))
+	action = ocf.OCF_ACTION
+
+	logPath = os.path.join(traceDir, f"azure-events-az.{action}.{time.strftime('%Y-%m-%d.%H:%M:%S')}")
 	try:
 		os.makedirs(traceDir, exist_ok=True)
 		handler = ocf.logging.FileHandler(logPath, encoding="utf-8")
@@ -865,6 +869,10 @@ away from the affected node to allow for a graceful shutdown.
    			meta failure-timeout=120s
 		crm configure clone health-azure-events-cln health-azure-events \
   			meta allow-unhealthy-nodes=true
+
+When trace_dir is set, start logs are written under trace_dir/azure-events-az/ as
+azure-events-az.start.yyyy-mm-dd.hh:mm:ss, even without verbose logging.
+Verbose monitor logs use azure-events-az.monitor.yyyy-mm-dd.hh:mm:ss.
 
 For further information on Microsoft Azure Scheduled Events, please
 refer to the following documentation:
