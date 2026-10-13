@@ -828,6 +828,10 @@ def configureLogger():
 	if not traceDir:
 		return
 
+	# Remove all existing handlers that the log is only written into the trace dir folder
+	for handler in ocf.log.handlers[:]:
+		ocf.log.removeHandler(handler)
+
 	# Ensure the trace directory exists and is an absolute path
 	traceDir = os.path.abspath(os.path.join(traceDir, "azure-events-az"))
 	action = ocf.OCF_ACTION
