@@ -826,7 +826,14 @@ def setLoglevel(verbose):
 def configureLogger():
 	traceDir = ocf.get_parameter("trace_dir")
 	if not traceDir:
-		return
+		try:
+			traceDir = subprocess.check_output(
+				["/bin/sh", "-c", '. "$1" && printf "%s" "$HA_VARLIB/trace_ra"',
+				 "sh", os.path.join(OCF_FUNCTIONS_DIR, "ocf-directories")],
+				universal_newlines=True)
+		except (OSError, subprocess.CalledProcessError) as error:
+			ocf.logger.warning(f"Unable to determine default trace directory: {error}")
+			return
 
 	# Remove all existing handlers that the log is only written into the trace dir folder
 	for handler in ocf.log.handlers[:]:
@@ -874,9 +881,10 @@ away from the affected node to allow for a graceful shutdown.
 		crm configure clone health-azure-events-cln health-azure-events \
   			meta allow-unhealthy-nodes=true
 
-When trace_dir is set, start logs are written under trace_dir/azure-events-az/ as
-azure-events-az.start.yyyy-mm-dd.hh:mm:ss, even without verbose logging.
-Verbose monitor logs use azure-events-az.monitor.yyyy-mm-dd.hh:mm:ss.
+When verbose logging is enabled (via verbose or trace_ra), logs are written
+under trace_dir/azure-events-az/. If trace_dir is unset or empty, it defaults
+to $HA_VARLIB/trace_ra, with HA_VARLIB loaded from ocf-directories.
+Log files are named azure-events-az.<action>.yyyy-mm-dd.hh:mm:ss.
 
 For further information on Microsoft Azure Scheduled Events, please
 refer to the following documentation:
